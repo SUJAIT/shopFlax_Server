@@ -1,73 +1,80 @@
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// src/app/middleware/auth.ts
 import { NextFunction, Request, Response } from 'express';
-import catchAsync from '../utils/catchAsync';
-import { StatusCodes } from 'http-status-codes';
-import AppError from '../errors/appError';
 import jwt, { JwtPayload, TokenExpiredError } from 'jsonwebtoken';
-import config from '../config';
- // <-- typo fix
+
+
+import { StatusCodes } from 'http-status-codes';
+
 import User from '../modules/user/user.model';
-import { IUser, UserRole } from '../modules/user/usre.interface';
+import { UserRole } from '../modules/user/user.interface';
+import AppError from '../errors/appError';
+import config from '../config';
 
-// (Better) JWT payload টাইপ — যা আসলে টোকেনে থাকে
-interface TokenPayload extends JwtPayload {
-  role: UserRole;
-  email?: string;
-  phone?: string;
-  sub?: string; // যদি userId রাখো
-}
-
-// Express.Request এ user যোগ (globally রাখলে আলাদা .d.ts এ দাও)
-declare module 'express-serve-static-core' {
-  interface Request {
-    user?: IUser;
+// Helper: extract token from "Authorization: Bearer <token>" or cookie (optional)
+function extractAccessToken(req: Request): string | null {
+  const auth = req.headers.authorization;
+  if (auth && typeof auth === 'string') {
+    const parts = auth.split(' ');
+    if (parts.length === 2 && /^Bearer$/i.test(parts[0])) return parts[1];
+    return auth; // allow raw token too
   }
+  // if you also set cookies for access token, uncomment below:
+  // if (req.cookies?.accessToken) return req.cookies.accessToken as string;
+  return null;
 }
 
-const auth = (...requiredRoles: UserRole[]) => {
-  return catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const raw = req.headers.authorization;
-    if (!raw) {
-      throw new AppError(StatusCodes.UNAUTHORIZED, 'You are not authorized!');
-    }
-
-    // Support: "Bearer <token>"
-    const token = raw.startsWith('Bearer ') ? raw.split(' ')[1] : raw;
-
+/**
+ * Auth middleware
+ * - Verifies JWT access token
+ * - Ensures user exists & isActive
+ * - Optionally enforces role(s)
+ * - Attaches minimal user info to req.user
+ */
+const auth =
+  (...requiredRoles: UserRole[]) =>
+  async (req: Request, _res: Response, next: NextFunction) => {
     try {
+      const token = extractAccessToken(req);
+      if (!token) {
+        throw new AppError(StatusCodes.UNAUTHORIZED, 'You are not authorized!');
+      }
+
+      // Verify token
       const decoded = jwt.verify(
         token,
         config.jwt_access_secret as string
-      ) as TokenPayload;
+      ) as JwtPayload & { email?: string; role?: UserRole; id?: string };
 
-      const { role, email, phone, sub } = decoded;
-
-      // টোকেনের তথ্য দিয়ে ইউজার খুঁজো (id থাকলে id দিয়ে করা ভাল)
-      const user = sub
-        ? await User.findById(sub)
-        : await User.findOne({
-            $or: [{ email }, { phone }],
-            role,
-            isActive: true,
-          });
-
-      if (!user) {
-        throw new AppError(
-          StatusCodes.UNAUTHORIZED,
-          'This user is not authorized!'
-        );
+      const { email, role } = decoded;
+      if (!email || !role) {
+        throw new AppError(StatusCodes.UNAUTHORIZED, 'Invalid token payload!');
       }
 
-      // role গার্ড (model থেকে নাও)
+      // Check user in DB and active
+      const user = await User.findOne({ email }).select('_id email role isActive');
+      if (!user) {
+        throw new AppError(StatusCodes.NOT_FOUND, 'This user is not found!');
+      }
+      if (!user.isActive) {
+        throw new AppError(StatusCodes.UNAUTHORIZED, 'User is not active!');
+      }
+
+      // Role guard (if roles were passed)
       if (requiredRoles.length && !requiredRoles.includes(user.role)) {
         throw new AppError(StatusCodes.FORBIDDEN, 'You are not authorized!');
       }
 
-      // ✅ এখন IUser ডকুমেন্ট অ্যাসাইন করো
-      req.user = user;
-      next();
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
+      // Attach minimal identity on req.user
+  (req as any).user = {
+  id: user.id,            // <-- _id নয়, id (string virtual)
+  email: user.email,
+  role: user.role,
+};
+
+      return next();
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
         return next(
           new AppError(
             StatusCodes.UNAUTHORIZED,
@@ -75,9 +82,9 @@ const auth = (...requiredRoles: UserRole[]) => {
           )
         );
       }
+      if (err instanceof AppError) return next(err);
       return next(new AppError(StatusCodes.UNAUTHORIZED, 'Invalid token!'));
     }
-  });
-};
+  };
 
 export default auth;

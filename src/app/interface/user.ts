@@ -1,8 +1,9 @@
-import { UserRole } from "../modules/user/usre.interface";
+import { UserRole } from "../modules/user/user.interface";
 
 
 export type VerifiedUser = {
    email: string;
+   phone: string;
    role: UserRole;
    iat: number;
    exp: number;

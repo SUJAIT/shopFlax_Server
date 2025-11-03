@@ -11,6 +11,8 @@ async function server() {
 
     try {
 
+//   console.log(config.jwt_refresh_secret)
+
         await mongoose.connect(config.database_url as string);
  console.log("✅ MongoDB connected");
         app.listen(port, () => {

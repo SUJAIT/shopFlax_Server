@@ -1,157 +1,156 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/modules/user/user.model.ts
-import mongoose, { Schema } from 'mongoose';
-import bcrypt from 'bcrypt';
-import config from '../../config';
-import AppError from '../../errors/appError';
-import { StatusCodes } from 'http-status-codes';
-import { IUser, UserModel, UserRole } from './usre.interface';
+import mongoose, { Schema } from "mongoose";
+import bcrypt from "bcrypt";
+import { StatusCodes } from "http-status-codes";
 
+import config from "../../config";
+import AppError from "../../errors/appError";
+import { IUser, UserModel, UserRole } from "./user.interface";
 
-/** ---------------- Schema ---------------- */
-const clientInfoSchema = new Schema(
-  {
-    device: { type: String, enum: ['pc', 'mobile', 'tablet'] },
-    browser: { type: String },
-    ipAddress: { type: String },
-    pcName: { type: String },
-    os: { type: String },
-    userAgent: { type: String },
-  },
-  { _id: false }
-);
-
+/* ─────────────────────────────
+ * User Schema
+ * ───────────────────────────── */
 const userSchema = new Schema<IUser, UserModel>(
   {
-    name: { type: String, required: true, trim: true },
+    // Human-friendly ID (A00001 / E00001)
+    id: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+      trim: true,
+    },
 
-    // email OR phone — at least one required (validator নিচে আছে)
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     email: {
       type: String,
+      required: true,
+      unique: true,
       lowercase: true,
       trim: true,
-      index: true,
-      sparse: true, // allow multiple docs with null/undefined
-      unique: true,
-    },
-    phone: {
-      type: String,
-      trim: true,
-      index: true,
-      sparse: true,
-      unique: true,
     },
 
-    password: { type: String, required: true, select: false },
+    // Never return password by default
+    password: {
+      type: String,
+      required: true,
+      select: false,
+    },
 
     role: {
       type: String,
-      enum: Object.values(UserRole),
-      default: UserRole.USER,
+      enum: [UserRole.ADMIN, UserRole.EMPLOYEE],
       required: true,
+      default: UserRole.EMPLOYEE,
     },
 
-    hasShop: { type: Boolean, default: false },
+    clientInfo: {
+      device: {
+        type: String,
+        enum: ["pc", "mobile"],
+        required: true,
+      },
+      browser: { type: String, required: true },
+      ipAddress: { type: String, required: true },
+      pcName: { type: String },
+      os: { type: String },
+      userAgent: { type: String },
+    },
 
-    clientInfo: { type: clientInfoSchema, required: false },
+    lastLogin: {
+      type: Date,
+      default: Date.now,
+    },
 
-    lastLogin: { type: Date, default: null },
-    isActive: { type: Boolean, default: true },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
 
-    otpToken: { type: String, default: null },
+    otpToken: {
+      type: String,
+      default: null,
+    },
+
+    // optional, useful for revoking refresh tokens globally
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true, // createdAt, updatedAt
+    versionKey: false,
+  }
 );
 
-/** At least one of email/phone must be present */
-userSchema.pre('validate', function (next) {
-  if (!this.email && !this.phone) {
-    return next(
-      new AppError(
-        StatusCodes.BAD_REQUEST,
-        'Either email or phone is required.'
-      )
-    );
-  }
+/* ─────────────────────────────
+ * Hooks
+ * ───────────────────────────── */
+
+// Hash only when password is new/changed
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
+  this.password = await bcrypt.hash(
+    this.password,
+    Number(config.bcrypt_salt_rounds || 12)
+  );
   next();
 });
 
-/** Hash password when newly set or modified */
-userSchema.pre('save', async function () {
-  if (this.isModified('password') && this.password) {
-    this.password = await bcrypt.hash(
-      this.password,
-      Number(config.bcrypt_salt_rounds || 10)
-    );
-  }
+// After save, make sure password is never leaked if it gets selected manually
+userSchema.post("save", function (doc, next) {
+  (doc as any).password = undefined;
+  next();
 });
 
-/** Hash if password updated via findOneAndUpdate */
-/** Hash if password updated via findOneAndUpdate */
-userSchema.pre('findOneAndUpdate', async function () {
-  const update = this.getUpdate() as any;
-  const pwd =
-    update?.password ??
-    update?.$set?.password ??
-    (update?.$setOnInsert && update.$setOnInsert.password);
-  if (pwd) {
-    const hashed = await bcrypt.hash(
-      pwd,
-      Number(config.bcrypt_salt_rounds || 10)
-    );
-    if (update.password) update.password = hashed;
-    if (update.$set) update.$set.password = hashed;
-    if (update.$setOnInsert) update.$setOnInsert.password = hashed;
-  }
-});
-/** Hide password in JSON outputs */
-userSchema.set('toJSON', {
-  transform: (_doc, ret) => {
+// Ensure JSON serialization never exposes password
+userSchema.set("toJSON", {
+  transform: (_doc, ret: Record<string, any>) => {
     delete ret.password;
     return ret;
   },
 });
 
-/** -------- Instance Methods -------- */
-userSchema.methods.comparePassword = async function (
-  plainTextPassword: string
-): Promise<boolean> {
-  // `this.password` might be undefined (because select:false). Ensure loaded.
-  const current =
-    (this as any).password ??
-    (await (User as any)
-      .findById(this._id)
-      .select('+password')
-      .lean()
-      .then((u: any) => u?.password));
-  if (!current) return false;
-  return bcrypt.compare(plainTextPassword, current);
+/* ─────────────────────────────
+ * Statics (Model methods)
+ * ───────────────────────────── */
+
+userSchema.statics.isPasswordMatched = async function (
+  plainTextPassword: string,
+  hashedPassword: string
+) {
+  return bcrypt.compare(plainTextPassword, hashedPassword);
 };
 
-/** -------- Static Methods -------- */
-userSchema.statics.isUserExistsByEmailOrPhone = async function (
-  email?: string,
-  phone?: string
-): Promise<IUser | null> {
-  const query: any[] = [];
-  if (email) query.push({ email });
-  if (phone) query.push({ phone });
-  if (!query.length) return null;
-  return this.findOne({ $or: query }).select('+password');
+userSchema.statics.isUserExistsByEmail = async function (email: string) {
+  const doc = await User.findOne({ email: email.toLowerCase() }).select(
+    "+password"
+  );
+  return doc as unknown as IUser | null;
 };
 
-userSchema.statics.checkUserExistsById = async function (
-  userId: string
-): Promise<IUser | null> {
+userSchema.statics.checkUserExist = async function (userId: string) {
   const existingUser = await this.findById(userId);
+
   if (!existingUser) {
-    throw new AppError(StatusCodes.NOT_FOUND, 'User does not exist!');
+    throw new AppError(StatusCodes.NOT_ACCEPTABLE, "User does not exist!");
   }
   if (!existingUser.isActive) {
-    throw new AppError(StatusCodes.NOT_ACCEPTABLE, 'User is not active!');
+    throw new AppError(StatusCodes.NOT_ACCEPTABLE, "User is not active!");
   }
+
   return existingUser;
 };
 
-const User = mongoose.model<IUser, UserModel>('User', userSchema);
+/* ─────────────────────────────
+ * Model
+ * ───────────────────────────── */
+export const User = mongoose.model<IUser, UserModel>("User", userSchema);
 export default User;
