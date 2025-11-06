@@ -3,6 +3,8 @@ import { AuthRoutes } from "../modules/auth/auth.routes";
 
 import { userRoute } from "../modules/user/user.router";
 
+import { CategoryRoutes } from "../modules/category/category.router";
+
 
 
 const router = Router();
@@ -15,6 +17,10 @@ const moduleRoutes = [
     {
         path: '/auth',
         route: AuthRoutes,
+    },
+    {
+        path: '/categories',
+        route: CategoryRoutes,
     }
 ]
 

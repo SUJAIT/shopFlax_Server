@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/modules/user/user.services.ts
 import mongoose from "mongoose";
 import { StatusCodes } from "http-status-codes";

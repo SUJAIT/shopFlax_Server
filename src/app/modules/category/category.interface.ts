@@ -26,7 +26,7 @@ export interface ICategory extends Document {
   isActive: boolean;           // hide/show without delete
 
   // Optional visuals / SEO
-  icon?: string;               // icon key or URL
+   icon?: string | null;             // icon key or URL
   image?: string;              // banner/thumbnail URL
   metaTitle?: string;
   metaDescription?: string;
