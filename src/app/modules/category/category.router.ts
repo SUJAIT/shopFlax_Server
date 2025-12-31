@@ -2,6 +2,8 @@
 
 import { Router } from "express";
 import { CategoryController } from "./category.controller";
+import { UserRole } from "../user/user.interface";
+import auth from "../../middleware/auth";
 
 
 
@@ -11,6 +13,7 @@ const router = Router()
 router.post(
   "/",
   // validateRequest(createCategorySchema),ok
+   auth(UserRole.ADMIN),
   CategoryController.createCategory
 );
 
@@ -21,10 +24,10 @@ router.patch(
   CategoryController.updateCategory
 );
 
-// Get by id OR slug (একটাই এন্ডপয়েন্ট)
+// Get by id OR slug (একটাই এন্ডপয়েন্ট) ok
 router.get("/:idOrSlug", CategoryController.getCategoryByIdOrSlug);
 
-// List (query: parentId, q, isActive, page, limit, sort)
+// List (query: parentId, q, isActive, page, limit, sort) ok
 router.get("/", CategoryController.listCategories);
 
 // Delete (soft by default; ?hard=true দিলে হার্ড ডিলিট ট্রাই করবে)

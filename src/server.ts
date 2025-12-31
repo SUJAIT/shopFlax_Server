@@ -5,7 +5,7 @@ import config from "./app/config";
 
 
 
-const port = 5000
+const port = 8000
 
 async function server() {
 
