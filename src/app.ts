@@ -8,10 +8,10 @@ const app = express();
    Global Middlewares
 ====================== */
 
-// ✅ CORS (সবচেয়ে জরুরি)
+//  CORS  
 app.use(
   cors({
-    origin: "http://localhost:5173", // frontend
+    origin: "http://localhost:3000", // frontend
     credentials: true,
   })
 );
